@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gym
+import numpy as np
 import torch as th
 from gym import spaces
 from torch import nn
@@ -190,6 +191,28 @@ class DiagGaussianDistribution(Distribution):
         actions = self.actions_from_params(mean_actions, log_std)
         log_prob = self.log_prob(actions)
         return actions, log_prob
+
+
+class FixedVarDiagGaussianDistribution(DiagGaussianDistribution):
+    def __init__(self, action_dim: int):
+        super(FixedVarDiagGaussianDistribution, self).__init__(action_dim)
+
+    def proba_distribution_net(self, latent_dim: int,
+                               log_std_init: float = -1) -> Tuple[nn.Module, nn.Parameter]:
+        """
+        Create the layers and parameter that represent the distribution:
+        one output will be the mean of the Gaussian, the other parameter will be the
+        standard deviation (log std in fact to allow negative values).
+        The stadard deviation will be fixed to inital value.
+
+        :param latent_dim: (int) Dimension og the last layer of the policy (before the action layer)
+        :param log_std_init: (float) Initial value for the log standard deviation
+        :return: (nn.Linear, nn.Parameter)
+        """
+        mean_actions = nn.Linear(latent_dim, self.action_dim)
+        # TODO: allow action dependent std
+        log_std = nn.Parameter(th.ones(self.action_dim) * log_std_init, requires_grad=False)
+        return mean_actions, log_std
 
 
 class SquashedDiagGaussianDistribution(DiagGaussianDistribution):
