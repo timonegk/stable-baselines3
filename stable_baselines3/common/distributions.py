@@ -268,6 +268,33 @@ class SquashedDiagGaussianDistribution(DiagGaussianDistribution):
         log_prob = self.log_prob(action, self.gaussian_actions)
         return action, log_prob
 
+class FixedVarSquashedDiagGaussianDistribution(SquashedDiagGaussianDistribution):
+    """
+    Gaussian distribution with diagonal covariance matrix, for continuous actions.
+    Standard deviation is fixed to initial one.
+
+    :param action_dim:  Dimension of the action space.
+    """
+
+    def __init__(self, action_dim: int):
+        super(FixedVarSquashedDiagGaussianDistribution, self).__init__(action_dim)
+
+    def proba_distribution_net(self, latent_dim: int,
+                               log_std_init: float = -1) -> Tuple[nn.Module, nn.Parameter]:
+        """
+        Create the layers and parameter that represent the distribution:
+        one output will be the mean of the Gaussian, the other parameter will be the
+        standard deviation (log std in fact to allow negative values).
+        The stadard deviation will be fixed to inital value.
+
+        :param latent_dim: (int) Dimension og the last layer of the policy (before the action layer)
+        :param log_std_init: (float) Initial value for the log standard deviation
+        :return: (nn.Linear, nn.Parameter)
+        """
+        mean_actions = nn.Linear(latent_dim, self.action_dim)
+        log_std = nn.Parameter(th.ones(self.action_dim) * log_std_init, requires_grad=False)
+        return mean_actions, log_std
+
 
 class CategoricalDistribution(Distribution):
     """
@@ -690,6 +717,8 @@ def make_proba_distribution(
                 cls = FixedVarDiagGaussianDistribution
             elif type == "SquashedDiagGaussian":
                 cls = SquashedDiagGaussianDistribution
+            elif type == "FixedVarSquashedDiagGaussian":
+                cls = FixedVarSquashedDiagGaussianDistribution
             elif type == "Beta":
                 cls = BetaDistribution
             else:
