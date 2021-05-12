@@ -394,6 +394,7 @@ class ActorCriticPolicy(BasePolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        distribution_type: Distribution = None
     ):
 
         if optimizer_kwargs is None:
@@ -444,7 +445,8 @@ class ActorCriticPolicy(BasePolicy):
         self.dist_kwargs = dist_kwargs
 
         # Action distribution
-        self.action_dist = make_proba_distribution(action_space, use_sde=use_sde, dist_kwargs=dist_kwargs)
+        self.action_dist = make_proba_distribution(action_space, use_sde=use_sde, dist_kwargs=dist_kwargs,
+                                                   type=distribution_type)
 
         self._build(lr_schedule)
 
