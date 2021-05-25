@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gym
 import numpy as np
+import torch
 import torch as th
 from gym import spaces
 from torch import nn
-from torch.distributions import Bernoulli, Categorical, Normal
+from torch.distributions import Bernoulli, Categorical, Normal, Beta
 
 from stable_baselines3.common.preprocessing import get_action_dim
 
@@ -294,6 +295,99 @@ class FixedVarSquashedDiagGaussianDistribution(SquashedDiagGaussianDistribution)
         mean_actions = nn.Linear(latent_dim, self.action_dim)
         log_std = nn.Parameter(th.ones(self.action_dim) * log_std_init, requires_grad=False)
         return mean_actions, log_std
+
+
+class BetaDistribution(Distribution):
+    """
+    Beta distribution, for continuous actions.
+
+    :param action_dim:  Dimension of the action space.
+    """
+
+    def __init__(self, action_dim: int):
+        super(BetaDistribution, self).__init__()
+        self.distribution = None
+        self.action_dim = action_dim
+
+    def proba_distribution_net(self, latent_dim: int) -> Tuple[nn.Module, nn.Parameter]:
+        """
+        Create the layers and parameter that represent the distribution:
+
+        :param latent_dim: Dimension of the last layer of the policy (before the action layer)
+        :return:
+        """
+        alpha_minus_1 = nn.Linear(latent_dim, self.action_dim)
+        beta_minus_1 = nn.Linear(latent_dim, self.action_dim)
+        return alpha_minus_1, beta_minus_1
+
+    def proba_distribution(self, alpha_minus_1: th.Tensor, beta_minus_1: th.Tensor) -> "BetaDistribution":
+        """
+        Create the distribution given its parameters (alpha, beta)
+
+        :param alpha:
+        :param beta:
+        :return:
+        """
+        alpha = nn.functional.softplus(alpha_minus_1) + 1.0
+        beta = nn.functional.softplus(beta_minus_1) + 1.0
+        self.distribution = Beta(alpha, beta)
+        return self
+
+    def log_prob(self, actions: th.Tensor) -> th.Tensor:
+        """
+        Get the log probabilities of actions according to the distribution.
+        Note that you must first call the ``proba_distribution()`` method.
+
+        :param actions:
+        :return:
+        """
+        # scale from [-1, 1] action space to [0,1] distribution space
+        log_prob = self.distribution.log_prob((actions + 1.0) * 0.5)
+        return sum_independent_dims(log_prob)
+
+    def entropy(self) -> th.Tensor:
+        return sum_independent_dims(self.distribution.entropy())
+
+    def sample(self) -> th.Tensor:
+        # Reparametrization trick to pass gradients
+        # scale from [0,1] distribution space to [-1, 1] action space
+        return self.distribution.rsample() * 2.0 - 1.0
+
+    def mode(self) -> th.Tensor:
+        # pytorch has no function to get mode, compute it from alpha and beta. we know both are >= 1
+        alpha = self.distribution.concentration0
+        beta = self.distribution.concentration1
+        # handle edge case where they are both exactly 1
+        mode = []
+        for i in range(len(alpha)):
+            for j in range(len(alpha[0])):
+                if alpha[i][j] == 1.0 and beta[i][j] == 1.0:
+                    # there is not really a defined mode but in our context this makes sense
+                    mode.append(0.5)
+                else:
+                    mode.append((alpha[i][j] - 1)/(alpha[i][j] + beta[i][j] -2))
+        mode = th.tensor([mode])
+        # scale from [0,1] distribution space to [-1, 1] action space
+        return mode * 2.0 - 1.0
+
+    def actions_from_params(self, alpha_minus_1: th.Tensor, beta_minus_1: th.Tensor,
+                            deterministic: bool = False) -> th.Tensor:
+        # Update the proba distribution
+        self.proba_distribution(alpha_minus_1, beta_minus_1)
+        return self.get_actions(deterministic=deterministic)
+
+    def log_prob_from_params(self, alpha_minus_1: th.Tensor, beta_minus_1: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
+        """
+        Compute the log probability of taking an action
+        given the distribution parameters.
+
+        :param alpha:
+        :param beta:
+        :return:
+        """
+        actions = self.actions_from_params(alpha_minus_1, beta_minus_1)
+        log_prob = self.log_prob(actions)
+        return actions, log_prob
 
 
 class CategoricalDistribution(Distribution):

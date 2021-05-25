@@ -13,6 +13,7 @@ from torch import nn
 
 from stable_baselines3.common.distributions import (
     BernoulliDistribution,
+    BetaDistribution,
     CategoricalDistribution,
     DiagGaussianDistribution,
     Distribution,
@@ -531,6 +532,8 @@ class ActorCriticPolicy(BasePolicy):
             self.action_net = self.action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
         elif isinstance(self.action_dist, BernoulliDistribution):
             self.action_net = self.action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
+        elif isinstance(self.action_dist, BetaDistribution):
+            self.alpha_minus_1, self.beta_minus_1 = self.action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
         else:
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
 
@@ -542,12 +545,21 @@ class ActorCriticPolicy(BasePolicy):
             # Values from stable-baselines.
             # features_extractor/mlp values are
             # originally from openai/baselines (default gains/init_scales).
-            module_gains = {
-                self.features_extractor: np.sqrt(2),
-                self.mlp_extractor: np.sqrt(2),
-                self.action_net: 0.01,
-                self.value_net: 1,
-            }
+            if isinstance(self.action_dist, BetaDistribution):
+                module_gains = {
+                    self.features_extractor: np.sqrt(2),
+                    self.mlp_extractor: np.sqrt(2),
+                    self.alpha_minus_1: 0.01,
+                    self.beta_minus_1: 0.01,
+                    self.value_net: 1,
+                }
+            else:
+                module_gains = {
+                    self.features_extractor: np.sqrt(2),
+                    self.mlp_extractor: np.sqrt(2),
+                    self.action_net: 0.01,
+                    self.value_net: 1,
+                }
             for module, gain in module_gains.items():
                 module.apply(partial(self.init_weights, gain=gain))
 
@@ -597,6 +609,11 @@ class ActorCriticPolicy(BasePolicy):
         :param latent_sde: Latent code for the gSDE exploration function
         :return: Action distribution
         """
+        if isinstance(self.action_dist, BetaDistribution):
+            alphas_minus_1 = self.alpha_minus_1(latent_pi)
+            betas_minus_1 = self.beta_minus_1(latent_pi)
+            return self.action_dist.proba_distribution(alphas_minus_1, betas_minus_1)
+
         mean_actions = self.action_net(latent_pi)
 
         if isinstance(self.action_dist, DiagGaussianDistribution):
