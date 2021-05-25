@@ -135,6 +135,7 @@ class DiagGaussianDistribution(Distribution):
 
         :param latent_dim: Dimension of the last layer of the policy (before the action layer)
         :param log_std_init: Initial value for the log standard deviation
+        :param init_biases: Initialize the mu values of the distribution with given values
         :return:
         """
         mean_actions = nn.Linear(latent_dim, self.action_dim)

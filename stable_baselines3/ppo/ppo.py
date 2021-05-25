@@ -11,6 +11,8 @@ from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
+from torch import nn
+import torch
 
 
 class PPO(OnPolicyAlgorithm):
@@ -86,6 +88,7 @@ class PPO(OnPolicyAlgorithm):
         tensorboard_log: Optional[str] = None,
         create_eval_env: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
+        set_action_bias_from_env: bool = False,
         verbose: int = 0,
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
@@ -151,6 +154,27 @@ class PPO(OnPolicyAlgorithm):
 
         if _init_setup_model:
             self._setup_model()
+            if set_action_bias_from_env:
+                # get action biases from env
+                action_biases = self.env.env_method("get_action_biases")[0]
+                if self.policy_kwargs["distribution_type"] == "Beta":
+                    for i in range(len(action_biases)):
+                        # we neet do set alpha and beta so that the mode of the distribution will be correct
+                        # action is [-1,1], distribution is [0,1]
+                        mode = (action_biases[i] + 1) / 2
+                        # different distributions possible for same mode. we take one that is not too steep
+                        # decide on one value being 4. the other is based on the mode, but clipped to make it not steep
+                        if mode < 0.5:
+                            self.policy.alpha_minus_1.bias.data[i] = 4 -1
+                            self.policy.beta_minus_1.bias.data[i] = min((3 / mode) - 2, 20) -1
+                        else:
+                            self.policy.alpha_minus_1.bias.data[i] = min((2 * mode + 1) / (-mode + 1), 20) -1
+                            self.policy.beta_minus_1.bias.data[i] = 4 -1
+                else:
+                    # gaussian
+                    for i in range(len(action_biases)):
+                        # we can just set the bias of the mu value
+                        self.policy.action_net.bias.data[i] = action_biases[i]
 
     def _setup_model(self) -> None:
         super(PPO, self)._setup_model()
